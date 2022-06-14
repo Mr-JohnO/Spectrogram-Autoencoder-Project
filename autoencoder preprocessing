@@ -1,0 +1,106 @@
+import numpy as np
+import librosa
+import os
+
+# access each file in the given directory
+# load the files as time series
+# remove zeros at the end of time series if present
+# get signal duration for future calculations
+# determine whether they need to be padded
+# shift the time series (by one second) if possible (for data-augmentation)
+# (if so) set padding variables for shifting
+# apply padding and convert time-series to spectrograms with stft
+# (else) apply padding if necessary and convert time-series to spectrograms with stft
+# determine whether they need to be padded
+# determine whether the time series can be converted to multiple spectrograms with intervals of one second between \
+# each spectrogram (for data-augmentation)
+# (if so) shift time series window and convert time series to spectrograms with stft
+# convert time series to spectrograms with stft
+# abbreviate the array to a dimension size that is easy to work with for a neural network
+# establish file paths and file names for spectrograms
+# store spectrograms in preprocessed directory
+
+DATASET_PATH        = 'B:/Audio/HKU/AI Project/data/unprocessed/example'
+TARGET_PATH         = 'B:/Audio/HKU/AI Project/data/preprocessed/example'
+SAMPLE_RATE         = 22050
+DURATION            = 3  # in seconds
+DATA_AUGMENTATION   = False
+
+samples_in_duration = int(SAMPLE_RATE * DURATION)
+fft_size = 512
+
+
+def spectrogram_save(label):
+    global files, i, stft
+    # abbreviate the array to a dimension size that is easy to work with for a neural network
+    stft = np.delete(stft, np.s_[256:257], 0)
+    stft = np.delete(stft, np.s_[512:517], 1)
+    # establish file path and file name for spectrograms
+    try:
+        spectrogram_path = os.path.join(TARGET_PATH, files + label + str(i))
+    except NameError:
+        spectrogram_path = os.path.join(TARGET_PATH, files + label)
+    np.save(spectrogram_path, stft)
+    print(f'Saved {files} in {TARGET_PATH} as {os.path.basename(spectrogram_path)}. Shape = {np.shape(stft)}')
+
+
+# access each file in the given directory
+for folders in os.listdir(DATASET_PATH):
+    folders_path = os.path.join(DATASET_PATH, folders)
+    for files in os.listdir(folders_path):
+        file_path = os.path.join(folders_path, files)
+        if file_path.endswith('.wav'):
+            # load the files as time-series
+            signal, _ = librosa.load(file_path, sr=SAMPLE_RATE)
+
+            # remove zeros at the end of time series if present
+            while signal[-1] == 0:
+                signal = np.delete(signal, -1)
+            while signal[0] == 0:
+                signal = np.delete(signal, 0)
+
+            # get signal duration for future calculations
+            signal_duration = np.size(signal) / SAMPLE_RATE
+
+            # determine whether they need to be padded
+            if signal_duration < DURATION:
+                # shift the time series (by one second) if possible (for data-augmentation)
+                if signal_duration <= DURATION - 1 and DATA_AUGMENTATION:
+                    shifts = DURATION - int(signal_duration)
+                    print(f'{files} ({signal_duration} seconds) will be shifted {shifts - 1} time(s).')
+                    for i in range(shifts):
+                        # set padding variables for shifting.
+                        right_padding_amount = samples_in_duration - np.size(signal) - SAMPLE_RATE * i
+                        left_padding_amount = SAMPLE_RATE * i
+
+                        # apply padding and convert time-series to spectrograms with stft
+                        stft = np.abs(librosa.stft(np.pad(signal, (left_padding_amount, right_padding_amount)),
+                                                   n_fft=fft_size))
+
+                        # store spectrograms in preprocessed directory
+                        spectrogram_save('_shift_')
+                else:
+                    # apply padding if necessary and convert time-series to spectrograms with stft
+                    print(f'{files} ({signal_duration} seconds) will just be right-padded')
+                    padding_amount = samples_in_duration - np.size(signal)
+                    stft = np.abs(librosa.stft(np.pad(signal, (0, padding_amount)),
+                                               n_fft=fft_size))
+                    spectrogram_save('')
+
+            # determine whether the time series can be converted to multiple spectrograms with intervals of one second
+            # between each spectrogram (for data-augmentation)
+            elif np.size(signal) >= samples_in_duration + SAMPLE_RATE and DATA_AUGMENTATION:
+                chunks = int(signal_duration) - DURATION + 1
+                print(f'{files} ({signal_duration} seconds) will be converted into {chunks} spectrogram(s).')
+                for i in range(chunks):
+                    # shift time series window and convert time series to spectrograms with stft
+                    shift_amount = SAMPLE_RATE * i
+                    stft = np.abs(librosa.stft(signal[0 + shift_amount:samples_in_duration + shift_amount],
+                                               n_fft=fft_size))
+                    spectrogram_save('_chunk_')
+            else:
+                # convert time-series to spectrograms with stft
+                print(f'{files} ({signal_duration} seconds) will be abbreviated and converted.')
+                stft = np.abs(librosa.stft(signal[0:samples_in_duration],
+                                           n_fft=fft_size))
+                spectrogram_save('')
