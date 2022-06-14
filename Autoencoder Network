@@ -1,0 +1,279 @@
+import tensorflow as tf
+import keras
+from keras import layers, backend, losses, regularizers, optimizers
+from keras.callbacks import TensorBoard, LearningRateScheduler
+from time import time
+import random
+import numpy as np
+import os
+import soundfile as sf
+import librosa
+import matplotlib.pyplot as plt
+
+# (optional) improve GPU memory-handling (still not great)
+# (optional) disable GPU
+# set the size of the input dimension
+# build encoder
+# establish encoder model
+# build decoder
+# establish decoder model
+# establish autoencoder model
+# collect spectrograms in x_train and x_test
+# prepare spectrograms in x_train and x_test for the autoencoder
+# train the autoencoder
+# save the encoder, decoder and autoencoder models
+# load the saved models as a new model
+# train the autoencoder version N
+# save the (new) encoder, decoder and autoencoder models
+# collect spectrograms in x_examples for testing specific audio files
+# prepare spectrograms in x_example for the autoencoder
+# create lists for displaying the spectrograms
+# save spectrograms in x_examples to .wav files
+# apply normalization per spectrogram
+# denormalize decoded spectrograms
+# save decoded spectrograms to .wav files
+# show spectrograms
+RESET               = False  # delete all models if enabled
+VERSION             = 0
+X_TRAIN_PATH        = 'B:/Audio/HKU/AI Project/data/preprocessed/train'
+X_TEST_PATH         = 'B:/Audio/HKU/AI Project/data/preprocessed/test'
+X_EXAMPLE_PATH      = 'B:/Audio/HKU/AI Project/data/preprocessed/example'
+SPECTROGRAM_HEIGHT  = 256
+SPECTROGRAM_WIDTH   = 512
+TRAIN               = True
+X_TRAIN_AMOUNT      = 3200  # per epoch (total = 8668)
+X_TEST_AMOUNT       = 800  # per epoch (total = 4027)
+EPOCHS              = 150
+BATCH_SIZE          = 8
+LEARNING_RATE       = 0.0001  # default = 0.001
+PREDICT             = True
+DISPLAY             = True  # needs predict enabled
+SAMPLE_RATE         = 22050
+
+
+def conv2d_pooling(filters, input):
+    x = layers.Conv2D(filters, (3, 3), activation='relu', padding='same')(input)
+    x = layers.Dropout(rate=.2)(x)
+    x = layers.MaxPooling2D((2, 2), padding='same')(x)
+    x = keras.layers.BatchNormalization()(x)
+    return x
+
+
+def conv2d_upsampling(filters, input):
+    x = layers.Conv2D(filters, (3, 3), activation='relu', padding='same')(input)
+    x = layers.Dropout(rate=.2)(x)
+    x = layers.UpSampling2D((2, 2))(x)
+    x = keras.layers.BatchNormalization()(x)
+    return x
+
+
+np.seterr(divide='ignore', invalid='ignore')
+
+
+def add_spectrograms(type, path, amount, normalize, randomize):
+    def append_spectrograms():
+        spectrograms_path = os.path.join(path, files)
+        spectrograms = np.load(spectrograms_path)
+        if normalize:
+            spectrograms = np.divide((spectrograms - np.min(spectrograms)),
+                                     (np.max(spectrograms) - np.min(spectrograms)))
+        type.append(spectrograms)
+    if randomize:
+        for files in random.sample(os.listdir(path), len(os.listdir(path)))[:amount]:
+            append_spectrograms()
+    else:
+        for files in os.listdir(path)[:amount]:
+            append_spectrograms()
+
+
+# improve GPU memory-handling (still not great)
+"""gpus = keras.backend.config.list_physical_devices('GPU')
+keras.backend.config.set_memory_growth(gpus[0], True)
+os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"""
+
+# disable GPU
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
+# set the size of the input dimension
+spectrogram_dim = (SPECTROGRAM_HEIGHT, SPECTROGRAM_WIDTH, 1)
+
+# build encoder
+encoder_input = keras.layers.Input(spectrogram_dim)
+
+x = conv2d_pooling(16, encoder_input)  # convolutional encoding blocks
+x = conv2d_pooling(16, x)
+x = conv2d_pooling(16, x)
+x = conv2d_pooling(8, x)
+x = conv2d_pooling(8, x)
+x = conv2d_pooling(4, x)
+
+shape_before_flatten = keras.backend.int_shape(x)[1:]
+
+x = keras.layers.Flatten()(x)
+
+latent_dim = 16
+
+encoded = keras.layers.Dense(latent_dim, activation='relu')(x)
+
+# establish encoder model
+encoder = keras.Model(encoder_input, encoded, name='encoder')
+encoder.summary()
+
+# build decoder
+decoder_input = keras.layers.Input(shape=latent_dim)
+x = keras.layers.Dense(units=np.prod(shape_before_flatten))(decoder_input)
+x = keras.layers.Reshape(target_shape=shape_before_flatten)(x)
+
+x = conv2d_upsampling(4, x)  # convolutional decoding blocks
+x = conv2d_upsampling(8, x)
+x = conv2d_upsampling(8, x)
+x = conv2d_upsampling(16, x)
+x = conv2d_upsampling(16, x)
+x = conv2d_upsampling(16, x)
+
+decoded = layers.Conv2D(1, (3, 3), activation='sigmoid', padding='same')(x)
+
+# establish decoder model
+decoder = keras.Model(decoder_input, decoded, name='decoder')
+decoder.summary()
+
+# establish autoencoder model
+autoencoder_encoder_output = encoder(encoder_input)
+autoencoder_decoder_output = decoder(autoencoder_encoder_output)
+autoencoder = keras.Model(encoder_input, autoencoder_decoder_output, name='autoencoder')
+autoencoder.summary()
+
+
+if RESET:
+    # PermissionError: [WinError 5] Access is denied: 'model/autoencoder0.tf'
+    """for files in os.listdir('model/'):
+        if files.endswith('.tf'):
+            os.remove('model/' + files)"""
+    encoder.save('model/encoder' + str(VERSION) + '.tf', save_format='tf')
+    decoder.save('model/decoder' + str(VERSION) + '.tf', save_format='tf')
+    autoencoder.save('model/autoencoder' + str(VERSION) + '.tf', save_format='tf')
+
+
+def autoencoder_run(encoder_old, encoder_new,
+                    decoder_old, decoder_new,
+                    autoencoder_old, autoencoder_new):
+
+    # load the saved models as a new model
+    _encoder = keras.models.load_model('model/' + encoder_old + '.tf', compile=False)
+    _decoder = keras.models.load_model('model/' + decoder_old + '.tf', compile=False)
+    _autoencoder = keras.models.load_model('model/' + autoencoder_old + '.tf', compile=False)
+
+    # train the autoencoder version N
+    if TRAIN:
+        tensorboard = TensorBoard(log_dir="logs/{}".format(time()))
+
+        optimizer = tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE)
+        _autoencoder.compile(loss='mse', optimizer=optimizer, metrics=['accuracy'])
+
+        for epoch in range(EPOCHS):
+            # collect spectrograms in x_train and x_test
+            x_train = []
+            add_spectrograms(x_train, X_TRAIN_PATH, X_TRAIN_AMOUNT, normalize=True, randomize=True)
+            print(f'x_train shape + max value: {np.shape(x_train)}, {np.max(x_train)}')
+
+            # for some reason the max value of this list occasionally results in 'nan', hence this rough workaround
+            x_test = [0]
+            while np.max(x_test) != 1.0:
+                x_test.clear()
+                add_spectrograms(x_test, X_TEST_PATH, X_TEST_AMOUNT, normalize=True, randomize=True)
+            print(f'x_test shape + max value: {np.shape(x_test)}, {np.max(x_test)}')
+
+            # prepare spectrograms in x_train and x_test for the autoencoder
+            x_train = np.array(x_train)[..., np.newaxis]
+            x_test = np.array(x_test)[..., np.newaxis]
+            x_train = x_train.astype('float32')
+            x_test = x_test.astype('float32')
+
+            _autoencoder.fit(x_train, x_train,
+                             epochs=epoch+1,
+                             initial_epoch=epoch,
+                             batch_size=BATCH_SIZE,
+                             shuffle=True,
+                             validation_data=(x_test, x_test),
+                             callbacks=[tensorboard])  # tensorboard --logdir=logs/ in terminal
+
+        # save the encoder, decoder and autoencoder model
+        _encoder.save('model/' + encoder_new + '.tf', save_format='tf')
+        _decoder.save('model/' + decoder_new + '.tf', save_format='tf')
+        _autoencoder.save('model/' + autoencoder_new + '.tf', save_format='tf')
+
+    # collect spectrograms in x_examples for testing specific audio files
+    x_example = []
+    add_spectrograms(x_example, X_EXAMPLE_PATH, len(os.listdir(X_EXAMPLE_PATH)), normalize=False, randomize=False)
+
+    # prepare spectrograms in x_example for the autoencoder
+    x_example = np.array(x_example)[..., np.newaxis]
+    x_example = x_example.astype('float32')
+
+    # create lists for displaying the spectrograms
+    spectrogram_default_display = []
+    spectrogram_decoded_display = []
+
+    for i, spectrograms in enumerate(x_example):
+
+        def spectrogram_save(spectrogram, label):
+            signal = librosa.griffinlim(spectrogram)
+            file_name = str(i) + '_' + label + '.wav'
+            sf.write('audio/' + file_name, signal, SAMPLE_RATE, 'PCM_24')
+            print(f'Saved {label} spectrogram as: {file_name}')
+
+        # save spectrograms in x_examples to .wav files
+        spectrograms_default = spectrograms[:, :, 0]
+        spectrogram_save(spectrograms_default, 'default')
+
+        spectrogram_default_display.append(spectrograms_default)
+
+        if PREDICT:
+            # apply denormalization per spectrogram
+            print(
+                f'spectrogram shape + max value before normalization: {np.shape(spectrograms)}, {np.max(spectrograms)}')
+            spectrograms_normalized = np.divide((spectrograms - np.min(spectrograms)),
+                                                (np.max(spectrograms) - np.min(spectrograms)))
+
+            # get the predictions for the encoder and decoder model
+            spectrograms_encoded = _encoder.predict(np.array([spectrograms_normalized]))
+            spectrograms_decoded = _decoder.predict(spectrograms_encoded)
+
+            # denormalize decoded spectrograms
+            print('decoded spectrograms shape + max value before denormalization: ',
+                  np.shape(spectrograms_decoded), np.max(spectrograms_decoded))
+            spectrograms_decoded = spectrograms_decoded * (np.max(spectrograms) - np.min(spectrograms)) \
+                                   + np.min(spectrograms)
+            print('decoded spectrogram shape + max value after denormalization: ',
+                  np.shape(spectrograms_decoded), np.max(spectrograms_decoded))
+
+            # save decoded spectrograms to .wav files
+            spectrograms_decoded = spectrograms_decoded[0, :, :, 0]
+            spectrogram_save(spectrograms_decoded, 'decoded')
+
+            spectrogram_decoded_display.append(spectrograms_decoded)
+
+    # show spectrograms
+    if PREDICT and DISPLAY:
+        n = len(os.listdir(X_EXAMPLE_PATH))  # How many digits we will display
+        plt.figure(figsize=(4, 2))
+        for i in range(n):
+            # Display original
+            ax = plt.subplot(2, n, i + 1)
+            plt.imshow(spectrogram_default_display[i].reshape(SPECTROGRAM_HEIGHT, SPECTROGRAM_WIDTH))
+            plt.gray()
+            ax.get_xaxis().set_visible(False)
+            ax.get_yaxis().set_visible(False)
+
+            # Display reconstruction
+            ax = plt.subplot(2, n, i + 1 + n)
+            plt.imshow(spectrogram_decoded_display[i].reshape(SPECTROGRAM_HEIGHT, SPECTROGRAM_WIDTH))
+            plt.gray()
+            ax.get_xaxis().set_visible(False)
+            ax.get_yaxis().set_visible(False)
+        plt.show()
+
+
+autoencoder_run('encoder' + str(VERSION), 'encoder' + str(VERSION + 1),
+                'decoder' + str(VERSION), 'decoder' + str(VERSION + 1),
+                'autoencoder' + str(VERSION), 'autoencoder' + str(VERSION + 1))
