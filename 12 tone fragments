@@ -1,0 +1,159 @@
+#12-tone fragments programmed
+
+!pip install colorama
+
+import random, colorama, time
+from colorama import Fore, Back, Style
+
+referenceScale = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] #This is used for identifying the intervals from different fragments
+
+scaleList = []
+wholeHalfC = ["C", "D", "D#", "F", "F#", "G#", "A", "B"]
+scaleList.append(wholeHalfC)
+halfWholeC = ["C", "C#", "D#", "E", "F#", "G", "A", "A#"]
+scaleList.append(halfWholeC)
+chromaticScale = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] #This can be used for obtaining different fragments
+scaleList.append(chromaticScale)
+chromaticScaleImaginary = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "I"]
+scaleList.append(chromaticScaleImaginary)
+
+triadList = []
+majTriad = [4, 7, "major:", "major"]
+triadList.append(majTriad)
+minTriad = [3, 7, "minor:", "minor"]
+triadList.append(minTriad)
+dimTriad = [3, 6, "diminished:", "diminshed"]
+triadList.append(dimTriad)
+susTriad = [5, 7, "suspended:", "suspended"]
+triadList.append(susTriad)
+augTriad = [4, 8, "augmented:", "augmented"]
+triadList.append(augTriad)
+lydTriad = [6, 7, "lydian:", "lydian"]
+triadList.append(lydTriad)
+
+
+def Randomize(Scale):
+    random.shuffle(Scale)
+    print(Fore.RESET + Style.BRIGHT + "Your shuffled Scale:", Scale)
+
+
+def lookForTriads(Fragment, Triad):
+    x = 0
+    for notes in Fragment:
+        try:
+            firstInverval = referenceScale.index(notes) + Triad[0]
+            secondInverval = referenceScale.index(notes) + Triad[1]
+            foundTriads = []
+            try:
+                if referenceScale[firstInverval] in Fragment and referenceScale[secondInverval] in Fragment:   
+                      foundTriads.extend([notes, referenceScale[firstInverval], referenceScale[secondInverval]])
+            except:
+                if referenceScale[secondInverval - 12] in Fragment:
+                    try:
+                        if referenceScale[firstInverval] in Fragment:
+                            foundTriads.extend([notes, referenceScale[firstInverval], referenceScale[secondInverval - 12]])
+                    except:
+                        if referenceScale[firstInverval - 12] in Fragment:
+                            foundTriads.extend([notes, referenceScale[firstInverval - 12], referenceScale[secondInverval - 12]])
+            if len(foundTriads) != 0:
+                print(Fore.YELLOW + foundTriads[0], Triad[2], foundTriads)
+            else:
+                x += 1
+        except:
+            pass
+    if x == len(Fragment):
+        print(Fore.RED + f"No {Triad[3]} triads found.")
+
+
+def lookForAllTriads(Fragment):
+    print()
+    print(Style.RESET_ALL + "Found triads:")
+    for Triad in triadList:
+        lookForTriads(Fragment, Triad)
+    print(Style.RESET_ALL)
+
+
+def Divide(Scale):
+    onlyEven = Scale[1::2]
+    print(Fore.RESET + Style.BRIGHT + "Only evens:", onlyEven)
+    lookForAllTriads(onlyEven)
+        
+    onlyOdd = Scale[0::2]
+    print(Fore.RESET + Style.BRIGHT + "Only odds:", onlyOdd)
+    lookForAllTriads(onlyOdd)
+
+    groupsOfThreeA = []
+    groupsOfThreeB = []
+    for i in range(3):
+        groupsOfThreeA.extend(Scale[i::6])
+        groupsOfThreeB.extend(Scale[i + 3::6])
+    print(Fore.RESET + Style.BRIGHT + "Groups of three A:", groupsOfThreeA)
+    lookForAllTriads(groupsOfThreeA)
+    print(Fore.RESET + Style.BRIGHT + "Groups of three B:", groupsOfThreeB)
+    lookForAllTriads(groupsOfThreeB)
+
+    if len(Scale) % 4 == 0 and len(Scale) >= 8:
+        Poles = []
+        divideByFour = len(Scale) / 4
+        for i in range(len(Scale))[::int(divideByFour)]:
+            Poles.append(Scale[i])
+        print(Fore.RESET + Style.BRIGHT + "Poles:", Poles)
+        lookForAllTriads(Poles)
+
+
+def createFragments(Scale):
+    print()
+    Randomize(Scale)
+    print()
+    Divide(Scale)
+    print("Note: the chord notation isn't always enharmonically accurate.")
+    print()
+
+
+def execute():
+    print(Fore.RESET + Style.BRIGHT)
+    for (i, Scales) in enumerate(scaleList, start = 1):
+        print(i, Scales)
+    print(Style.RESET_ALL)
+    choosingScale = True
+    while choosingScale:
+        try:
+            userImput = int(input("Which scale? "))
+            x = 0
+            for Scales in range(len(scaleList)):
+                if userImput - 1 == Scales:
+                    createFragments(scaleList[Scales])
+                    global fragmentsCreated
+                    fragmentsCreated = True
+                    choosingScale = False
+                else:
+                    x += 1
+            if x == len(scaleList):
+                print()
+                print(Fore.RED + "No scale found.")
+                print(Style.RESET_ALL)
+        except ValueError:
+            print()
+            print(Fore.RED + "Type a number of a scale.")
+            print(Style.RESET_ALL)
+        
+
+choosingContinue = True
+fragmentsCreated = False
+
+while choosingContinue:
+    if fragmentsCreated == True:
+        Choice = input("Try again? (y/n) ")
+        if Choice == "y" or Choice == "Y" or Choice == "yes" or Choice == "Yes":
+            execute()
+        elif Choice == "n" or Choice == "N" or Choice == "no" or Choice == "No":
+            print()
+            print("Goodbye!")
+            choosingContinue = False
+        else:
+            print()
+            print("That's not a choice.")
+    else:
+        print("Welcome.")
+        execute()
+        
